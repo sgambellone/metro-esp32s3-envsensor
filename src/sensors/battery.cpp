@@ -6,11 +6,16 @@
 static Adafruit_MAX17048 maxlipo;
 static bool s_ok = false;
 
+// Initialize the onboard MAX17048 fuel gauge on the shared Wire bus. Call
+// Wire.begin() first. Caches success in s_ok so reads can fail fast if absent.
 bool battery_begin() {
   s_ok = maxlipo.begin(&Wire);
   return s_ok;
 }
 
+// Read state of charge, voltage, and charge rate, and infer charging state
+// (positive charge rate or a high resting voltage). Sanity-checks the values and
+// returns valid=false if the gauge looks absent/wedged (e.g. 0 V or absurd %).
 BatteryReading battery_read() {
   BatteryReading r;
   if (!s_ok) return r;

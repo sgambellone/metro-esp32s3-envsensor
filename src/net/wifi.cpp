@@ -6,6 +6,9 @@ static const char* s_ssid = nullptr;
 static const char* s_pass = nullptr;
 static uint32_t    s_lastRetry = 0;
 
+// Start connecting to Wi-Fi in station mode (non-blocking — returns immediately).
+// Stashes the credentials for wifi_loop() reconnects, disables modem sleep for
+// lower MQTT latency, and enables the core's auto-reconnect.
 void wifi_begin(const char* ssid, const char* pass) {
   s_ssid = ssid;
   s_pass = pass;
@@ -16,10 +19,13 @@ void wifi_begin(const char* ssid, const char* pass) {
   WiFi.begin(ssid, pass);
 }
 
+// True when the station is associated and has an IP.
 bool wifi_connected() {
   return WiFi.status() == WL_CONNECTED;
 }
 
+// Call periodically. If the link is down, force a reconnect attempt at most once
+// every 10 s (a backstop on top of the core's own auto-reconnect).
 void wifi_loop() {
   if (WiFi.status() == WL_CONNECTED) return;
   // Belt-and-suspenders on top of setAutoReconnect: force a retry every 10 s.

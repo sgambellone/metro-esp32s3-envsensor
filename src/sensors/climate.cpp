@@ -6,10 +6,15 @@
 
 static Adafruit_HDC302x hdc;
 
+// Initialize the HDC3022 on the shared Wire bus. Call Wire.begin() first.
+// Returns true if the sensor ACKs at its I2C address.
 bool climate_begin() {
   return hdc.begin(I2C_ADDR_HDC3022, &Wire);
 }
 
+// NOAA heat index ("feels like"), the Rothfusz regression with the standard
+// low- and high-humidity adjustments. T in °F, RH in %. Below ~80°F the heat
+// index isn't meaningful, so we just return the actual temperature.
 float heatIndexF(float T, float RH) {
   if (T < 80.0f) return T;  // heat index not meaningful below ~80°F
   float HI = -42.379f + 2.04901523f * T + 10.14333127f * RH
@@ -23,6 +28,9 @@ float heatIndexF(float T, float RH) {
   return HI;
 }
 
+// Trigger one on-demand HDC3022 conversion and return temperature (°C and °F),
+// humidity, and the derived feels-like. On an I2C failure the returned struct
+// has valid=false and all fields left at zero.
 ClimateReading climate_read() {
   ClimateReading r;
   double t = 0, rh = 0;

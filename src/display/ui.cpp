@@ -24,6 +24,11 @@ static lv_obj_t* s_hum    = nullptr;
 static lv_obj_t* s_batt   = nullptr;
 static lv_obj_t* s_status = nullptr;
 
+// Build the static UI on the active screen: black background, the hero
+// temperature row (big number + "°F"), the feels-like line, and the bottom row
+// (humidity left, battery right) plus a small status label. Widget handles are
+// stashed in the file-scope s_* pointers so ui_update() can change their text.
+// Call once after lvgl_port_init().
 void ui_init() {
   lv_obj_t* scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_hex(COLOR_BG), LV_PART_MAIN);
@@ -80,6 +85,8 @@ void ui_init() {
   lv_obj_align(s_status, LV_ALIGN_TOP_LEFT, 4, 2);
 }
 
+// Pick the LVGL battery glyph that best matches the charge level (used only when
+// the pack is discharging; a charging pack shows the lightning-bolt glyph).
 static const char* batterySymbol(float pct) {
   if (pct >= 87) return LV_SYMBOL_BATTERY_FULL;
   if (pct >= 62) return LV_SYMBOL_BATTERY_3;
@@ -88,6 +95,10 @@ static const char* batterySymbol(float pct) {
   return LV_SYMBOL_BATTERY_EMPTY;
 }
 
+// Push the latest sensor readings into the labels. Temperature/feels-like honor
+// USE_FAHRENHEIT; invalid climate shows "--". The battery label is recolored by
+// level (green/amber/red) and shows a charge bolt when charging. Invalid
+// readings simply leave the previous text in place.
 void ui_update(const ClimateReading& c, const BatteryReading& b) {
   if (c.valid) {
     float t = USE_FAHRENHEIT ? c.tempF : c.tempC;
@@ -113,6 +124,8 @@ void ui_update(const ClimateReading& c, const BatteryReading& b) {
   }
 }
 
+// Set the small top-left status line (Wi-Fi / Home Assistant state, or an error
+// such as a missing sensor). Safe to call before ui_init() (it no-ops).
 void ui_set_status(const char* msg) {
   if (s_status) lv_label_set_text(s_status, msg);
 }

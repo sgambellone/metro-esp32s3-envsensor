@@ -30,13 +30,17 @@ static LGFX lcd;
 static ClimateReading g_climate;
 static BatteryReading g_battery;
 
+// Refresh the small on-screen status label (top-left) to reflect the current
+// Wi-Fi and Home Assistant connection state. Called once per sensor cycle.
 static void updateStatusLine() {
-  // Compact bottom-of-screen-left network state.
   if (!wifi_connected())       ui_set_status(LV_SYMBOL_WIFI "  connecting...");
   else if (!ha_connected())    ui_set_status(LV_SYMBOL_WIFI "  HA: connecting...");
   else                         ui_set_status(LV_SYMBOL_WIFI "  HA " LV_SYMBOL_OK);
 }
 
+// One-time bring-up, in order: serial, display + LVGL, sensors on the shared I2C
+// bus, then start Wi-Fi (non-blocking) and the Home Assistant MQTT client.
+// Halts hard if LVGL fails to initialize (nothing else can work without it).
 void setup() {
   Serial.begin(115200);
   uint32_t t0 = millis();
@@ -67,6 +71,10 @@ void setup() {
   updateStatusLine();
 }
 
+// Non-blocking main scheduler: pumps LVGL and the network stacks on every pass,
+// reads the sensors + refreshes the UI on SENSOR_READ_INTERVAL_MS, and publishes
+// to Home Assistant on the slower MQTT_PUBLISH_INTERVAL_MS. The latest readings
+// are cached in g_climate/g_battery so the publish step can reuse them.
 void loop() {
   lv_timer_handler();
   wifi_loop();

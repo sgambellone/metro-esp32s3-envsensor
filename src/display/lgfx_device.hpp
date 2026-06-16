@@ -22,6 +22,9 @@ class LGFX : public lgfx::LGFX_Device {
   lgfx::Bus_SPI       _bus;
 
  public:
+  // Construct the device: configure the SPI bus (pins/clock/DMA), the ILI9341
+  // panel (CS, dimensions, color order), and attach the panel. Call lcd.init()
+  // afterwards (in setup) to actually bring the hardware up.
   LGFX() {
     // --- SPI bus ---
     {

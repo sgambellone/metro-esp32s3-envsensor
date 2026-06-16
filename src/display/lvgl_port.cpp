@@ -23,8 +23,13 @@ static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map)
   lv_display_flush_ready(disp);
 }
 
+// Tick source LVGL uses to drive its timers/animations: ms since boot.
 static uint32_t tick_cb() { return millis(); }
 
+// Initialize LVGL and bind it to an already-initialized LGFX panel: install the
+// tick callback, create the display, allocate the two PSRAM draw buffers, and
+// register the flush callback. Returns false if the PSRAM buffers can't be
+// allocated. (No touch input device — see the note in lgfx_device.hpp.)
 bool lvgl_port_init(LGFX* panel) {
   s_lcd = panel;
 

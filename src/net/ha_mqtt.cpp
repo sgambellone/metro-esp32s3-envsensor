@@ -14,6 +14,10 @@ static HASensorNumber haHum  (HA_ENTITY_HUM,   HASensorNumber::PrecisionP1);
 static HASensorNumber haFeels(HA_ENTITY_FEELS, HASensorNumber::PrecisionP1);
 static HASensorNumber haBatt (HA_ENTITY_BATT,  HASensorNumber::PrecisionP0);
 
+// Configure the HA device + four entities (name, device class, unit) and start
+// the MQTT client. ArduinoHA then auto-connects and reconnects on its own; HA
+// creates the entities via MQTT discovery on first connect. A null/empty
+// user/pass means an anonymous broker connection.
 void ha_begin(const char* host, uint16_t port, const char* user, const char* pass) {
   device.setName(HA_DEVICE_NAME);
   device.setSoftwareVersion("1.0.0");
@@ -44,10 +48,15 @@ void ha_begin(const char* host, uint16_t port, const char* user, const char* pas
   mqtt.begin(host, port, u, p);
 }
 
+// Pump the MQTT client (handles connect/reconnect and message I/O). Must be
+// called frequently from the main loop.
 void ha_loop() {
   mqtt.loop();
 }
 
+// Publish the latest readings to Home Assistant (no-op if not connected).
+// Temperature/feels-like honor USE_FAHRENHEIT; invalid readings are skipped.
+// ArduinoHA suppresses the MQTT message when a value is unchanged.
 void ha_publish(const ClimateReading& c, const BatteryReading& b) {
   if (!mqtt.isConnected()) return;
   if (c.valid) {
@@ -59,6 +68,7 @@ void ha_publish(const ClimateReading& c, const BatteryReading& b) {
   if (b.valid) haBatt.setValue(b.percent);
 }
 
+// True once the MQTT client has an active session with the broker.
 bool ha_connected() {
   return mqtt.isConnected();
 }
