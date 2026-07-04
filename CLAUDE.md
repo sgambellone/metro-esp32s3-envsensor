@@ -345,7 +345,7 @@ Build incrementally and verify each before moving on — don't write the whole f
 
 ---
 
-## 16. Build status & resume notes  _(updated 2026-06-12)_
+## 16. Build status & resume notes  _(updated 2026-07-04)_
 
 ### Done & verified on hardware
 - **Milestone 0-1 — scaffold.** `platformio.ini`, `board_pins.h`, `config.h`, `lv_conf.h`,
@@ -359,19 +359,56 @@ Build incrementally and verify each before moving on — don't write the whole f
   **custom ~110px hero temperature font** (`src/display/font_temp_110.c`), feels-like, humidity,
   battery. Layout tuned and approved.
 
-### Code-complete but NOT yet flashed/tested
-- **Milestone 8 — Wi-Fi + Home Assistant.** `src/net/wifi.*` + `src/net/ha_mqtt.*` written and
-  the full firmware **compiles** (Flash ~22%, RAM ~45%). Not run yet — needs real credentials
-  and a broker.
+### Done & verified on hardware (BLE path)
+- **Milestone 8 — Home Assistant, two backends (default = BLE).** Two HA paths, selected by
+  compile-time flags in `config.h` (`HA_ENABLE_BLE` / `HA_ENABLE_MQTT`):
+  - **BLE BTHome v2 broadcast (DEFAULT, `HA_ENABLE_BLE=1`) — FLASHED & VERIFIED.** `src/net/ha_ble.*`
+    — hand-rolled BTHome service-data advert via NimBLE, mirroring the sibling `remote-temp-esp32s3`
+    firmware. No broker, no Wi-Fi, native HA auto-discovery. Broadcasts packet-counter + temperature
+    + humidity + battery (BTHome has **no** object for feels-like, so that stays on-screen/MQTT-only).
+    Advertising is **continuous + non-blocking** (no `delay(ADV_MS)` — LVGL keeps ticking); each
+    `BLE_PUBLISH_INTERVAL_MS` just refreshes the advertised values. On hardware: sensor loop +
+    `[BLE] advert refreshed: 25.25C 62.15%RH (pkt N)` with the counter incrementing on cadence.
+    Flash ~19%, RAM ~43%. **`ble_begin()` runs FIRST in `setup()`** (before LVGL/sensors) — keep it
+    there. **Confirmed end-to-end in Home Assistant** (2026-07-04): `room-climate-01` auto-discovered
+    under BTHome with Temperature / Humidity / Battery populating live. **Milestone 8 (BLE) DONE.**
+  - **Wi-Fi + MQTT (`HA_ENABLE_MQTT=0`, OFF by default).** `src/net/wifi.*` + `src/net/ha_mqtt.*`,
+    unchanged, still un-flashed. Wi-Fi here is used *only* for MQTT. Enabling BOTH flags runs Wi-Fi +
+    BLE on the one 2.4 GHz radio (coexistence can be finicky) — do that deliberately.
+
+### ⚠️ BLE bring-up gotchas (learned the hard way, 2026-07-04)
+- **NimBLE-Arduino must be `2.5.0`, NOT `2.2.0`.** On this board (core 3.3.9 / IDF libs 5.5.4)
+  NimBLE **2.2.0** hard-crashes inside `NimBLEDevice::init()` → `esp_bt_controller_init` →
+  `btdm_controller_init` with a **TLSF heap assert** (`block_locate_free` / `search_suitable_block`
+  → `panic_abort`). Bumping to 2.5.0 (the version the sibling `remote-temp-esp32s3` actually
+  resolves to from `^2.2.0`) fixes it. Same core/IDF on both projects — it's purely the NimBLE lib.
+- **`-DARDUINO_USB_MODE=1` was added** (hardware USB-Serial/JTAG) alongside `ARDUINO_USB_CDC_ON_BOOT=1`.
+  Without it the board uses TinyUSB software CDC, whose USB task dies during a BLE-init crash so the
+  port drops off the bus and **no panic backtrace is ever visible** — you just see a silent hang.
+  With HW JTAG the port survives crashes and the exception decoder prints the real backtrace.
+- **Flashing crash-looping firmware needs manual ROM download mode.** When the flashed firmware
+  panics at boot (e.g. the 2.2.0 BLE crash), it reboot-loops and the USB port flickers, so esptool's
+  auto-reset can't grab it (`Failed to set baud` / `A device which does not exist`). Recover by
+  forcing download mode by hand: **hold BOOT, tap RESET, release BOOT** → stable port (VID `303A:1001`,
+  was COM23 here) → flash succeeds. Normal auto-reset flashing resumes once good firmware is on.
+- Serial port after a normal reset enumerates as **`303A:1001`** (HW JTAG). For a manual reset over
+  raw serial the polarity is inverted: **DTR asserted = GPIO0 high = run app**; DTR de-asserted =
+  download mode. RTS = EN (reset). (Same as the sibling's `monitor.ps1`.)
+- **BLE advertisement is capped at 31 bytes — keep the local name out of the main advert.** With
+  flags (3) + the full BTHome service data (15 for an 11-byte payload) you have only ~13 bytes left,
+  i.e. a name ≤ ~11 chars. Our `BLE_LOCAL_NAME` is 15 chars (`room-climate-01`), so the name is put
+  in the **scan response** (`setScanResponseData` + `enableScanResponse(true)` in `ha_ble.cpp`),
+  leaving the main advert lean. Symptom when this is wrong: NimBLE silently drops the service data
+  from the oversized advert, the device still appears in HA (from the tiny initial packet-id-only
+  advert) but shows **only Packet ID + Signal strength — no Temperature/Humidity/Battery**. The
+  sibling `remote-temp-esp32s3` never hit this because `vent-01` is short enough to fit inline.
 
 ### TO RESUME (next session, in order)
-1. Put real values in **`include/secrets.h`** (gitignored): Wi-Fi SSID/pass, `MQTT_HOST`,
-   `MQTT_USER`/`MQTT_PASS`. Ensure an **MQTT broker** is running (Mosquitto add-on in HA) and the
-   MQTT integration is enabled.
-2. `pio run -t upload`, then `pio device monitor`. Confirm Wi-Fi connects and the four entities
-   (Temperature, Humidity, Feels Like, Battery) appear in HA via auto-discovery.
-3. **Milestone 9 — hardening:** verify Wi-Fi/MQTT auto-reconnect, show last-good / fault glyph on
-   sensor read failure, confirm sane intervals, long-run soak.
+1. **MQTT path (optional):** set `HA_ENABLE_MQTT=1` (and usually `HA_ENABLE_BLE=0`) in `config.h`,
+   fill `include/secrets.h` (Wi-Fi SSID/pass, `MQTT_HOST`/`USER`/`PASS`), ensure a broker
+   (Mosquitto add-on) is running, then flash and confirm the four entities appear.
+2. **Milestone 9 — hardening:** sensor-read failure handling (show last-good / fault glyph), sane
+   intervals, long-run soak. (MQTT path also: Wi-Fi/MQTT auto-reconnect.)
 
 ### Key decisions / deviations from the original plan
 - **Phase 0 result:** on this board the Arduino header pins map 1:1 to GPIO — **DC = GPIO9,
@@ -380,7 +417,8 @@ Build incrementally and verify each before moving on — don't write the whole f
   (it ships its own serializer). ArduinoJson was dropped from `lib_deps`.
 - **Pinned versions:** lvgl 9.5.0 · LovyanGFX 1.2.21 · Adafruit HDC302x 1.0.3 ·
   Adafruit MAX1704X 1.0.3 · Adafruit BusIO 1.17.4 · home-assistant-integration 2.1.0 ·
-  PubSubClient 2.8.
+  PubSubClient 2.8 · **NimBLE-Arduino 2.5.0** (BLE path — 2.2.0 TLSF-asserts in
+  `btdm_controller_init` on this board; see BLE bring-up gotchas below).
 - **Touch dropped from the running firmware.** To keep the single I2C bus owned by exactly one
   driver (Arduino `Wire`, used by the sensors) and avoid dual-master flakiness on arduino-esp32
   3.x, LovyanGFX is **display-only** (`lgfx_device.hpp`). FT6206 hardware is validated and can be

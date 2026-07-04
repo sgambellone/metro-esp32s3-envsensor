@@ -19,23 +19,35 @@
 #include "display/ui.h"
 #include "sensors/climate.h"
 #include "sensors/battery.h"
-#include "net/wifi.h"
-#include "net/ha_mqtt.h"
 #include "board_pins.h"
 #include "config.h"
-#include "secrets.h"
+#if HA_ENABLE_MQTT
+  #include "net/wifi.h"
+  #include "net/ha_mqtt.h"
+  #include "secrets.h"
+#endif
+#if HA_ENABLE_BLE
+  #include "net/ha_ble.h"
+#endif
 
 static LGFX lcd;
 
 static ClimateReading g_climate;
 static BatteryReading g_battery;
 
-// Refresh the small on-screen status label (top-left) to reflect the current
-// Wi-Fi and Home Assistant connection state. Called once per sensor cycle.
+// Refresh the small on-screen status label (top-left) to reflect the active
+// Home Assistant backend's state. Called once per sensor cycle.
 static void updateStatusLine() {
+#if HA_ENABLE_MQTT
   if (!wifi_connected())       ui_set_status(LV_SYMBOL_WIFI "  connecting...");
   else if (!ha_connected())    ui_set_status(LV_SYMBOL_WIFI "  HA: connecting...");
   else                         ui_set_status(LV_SYMBOL_WIFI "  HA " LV_SYMBOL_OK);
+#elif HA_ENABLE_BLE
+  if (ble_active())            ui_set_status(LV_SYMBOL_BLUETOOTH "  BTHome " LV_SYMBOL_OK);
+  else                         ui_set_status(LV_SYMBOL_BLUETOOTH "  starting...");
+#else
+  ui_set_status("");
+#endif
 }
 
 // One-time bring-up, in order: serial, display + LVGL, sensors on the shared I2C
@@ -46,6 +58,12 @@ void setup() {
   uint32_t t0 = millis();
   while (!Serial && (millis() - t0) < 1500) { delay(10); }
   Serial.println(F("\n=== Metro ESP32-S3 climate display ==="));
+
+  // BLE first: the BT controller needs a contiguous block of internal DRAM, so
+  // claim it before LVGL's PSRAM buffers and the sensor stacks fragment the heap.
+#if HA_ENABLE_BLE
+  ble_begin();
+#endif
 
   // Display + LVGL
   lcd.init();
@@ -65,9 +83,11 @@ void setup() {
   Serial.printf("climate_begin=%d  battery_begin=%d\n", climateOk, batteryOk);
   if (!climateOk) ui_set_status("HDC3022 not found");
 
-  // Network: Wi-Fi (non-blocking) then Home Assistant MQTT
+  // Wi-Fi/MQTT backend is compiled in only when HA_ENABLE_MQTT is set (config.h).
+#if HA_ENABLE_MQTT
   wifi_begin(WIFI_SSID, WIFI_PASS);
   ha_begin(MQTT_HOST, MQTT_PORT, MQTT_USER, MQTT_PASS);
+#endif
   updateStatusLine();
 }
 
@@ -77,8 +97,10 @@ void setup() {
 // are cached in g_climate/g_battery so the publish step can reuse them.
 void loop() {
   lv_timer_handler();
+#if HA_ENABLE_MQTT
   wifi_loop();
   ha_loop();
+#endif
 
   // Sensor read + UI refresh
   static uint32_t lastSensor = 0;
@@ -105,6 +127,7 @@ void loop() {
     updateStatusLine();
   }
 
+#if HA_ENABLE_MQTT
   // MQTT publish (slower cadence)
   static uint32_t lastPublish = 0;
   if (ha_connected() && (millis() - lastPublish >= MQTT_PUBLISH_INTERVAL_MS)) {
@@ -112,6 +135,16 @@ void loop() {
     ha_publish(g_climate, g_battery);
     Serial.println(F("[HA] published"));
   }
+#endif
+
+#if HA_ENABLE_BLE
+  // BLE BTHome advertisement refresh (slower cadence)
+  static uint32_t lastBlefresh = 0;
+  if (ble_active() && (millis() - lastBlefresh >= BLE_PUBLISH_INTERVAL_MS)) {
+    lastBlefresh = millis();
+    ble_publish(g_climate, g_battery);
+  }
+#endif
 
   delay(5);
 }
